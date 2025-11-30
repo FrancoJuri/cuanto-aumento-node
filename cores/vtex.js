@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { supabase } from '../src/supabase.js';
+import { supabase } from '../config/supabase.js';
 /**
  * Obtiene o crea el ID del supermercado
  */

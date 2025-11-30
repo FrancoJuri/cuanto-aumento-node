@@ -1,62 +1,49 @@
 // test-disco.js
+// Test simple para verificar que el scraper funciona SIN guardar en la DB
 import 'dotenv/config';
-import { getDiscoMainProducts } from '../scrapers/disco.js';
+import { fetchVtexProducts } from '../cores/vtex.js';
+
+const BASE_URL = 'https://www.disco.com.ar';
+const SOURCE = 'disco';
+
+// Solo algunas categorías para probar
+const TEST_CATEGORIES = ['Leches', 'Gaseosas', 'Cuidado Oral'];
 
 async function test() {
-  try {
-    console.log('🚀 Iniciando test del scraper de Disco (MAESTRO)...\n');
+  console.log('🧪 TEST DE SCRAPER - DISCO');
+  console.log('=' .repeat(50));
+  console.log('⚠️  Este test NO guarda en la base de datos\n');
+
+  const allProducts = [];
+
+  for (const category of TEST_CATEGORIES) {
+    console.log(`🔍 Buscando: "${category}"...`);
     
-    const result = await getDiscoMainProducts();
+    const products = await fetchVtexProducts(BASE_URL, category, SOURCE, 10);
     
-    console.log('\n📊 RESUMEN FINAL:');
-    console.log(`✅ Éxito: ${result.totalProducts} productos obtenidos`);
-    console.log(`📅 Timestamp: ${result.timestamp}`);
-    console.log(`🏪 Fuente: ${result.source}`);
-    
-    // Mostrar algunos ejemplos de productos
-    if (result.products && result.products.length > 0) {
-      console.log('\n🎯 EJEMPLOS DE PRODUCTOS CON EAN:');
-      console.log('='.repeat(50));
-      
-      // Mostrar los primeros 3 productos como ejemplo
-      const exampleCount = Math.min(3, result.products.length);
-      
-      for (let i = 0; i < exampleCount; i++) {
-        const p = result.products[i];
-        console.log(`\n📦 PRODUCTO ${i + 1}:`);
-        console.log(`   🆔 EAN: ${p.ean || '❌ NO ENCONTRADO'}`); // Destacar el EAN
-        console.log(`   📝 Nombre: ${p.name}`);
-        console.log(`   🔗 URL: ${p.link}`);
-        console.log(`   💰 Precio: $${p.price}`);
-        console.log(`   🏷️  Marca: ${p.brand}`);
-        console.log('-'.repeat(40));
-      }
-      
-      // Mostrar estadísticas adicionales
-      console.log('\n📈 ESTADÍSTICAS ADICIONALES:');
-      
-      // Contar productos por marca (top 5)
-      const brandCount = {};
-      result.products.forEach(product => {
-        if (product.brand) {
-          brandCount[product.brand] = (brandCount[product.brand] || 0) + 1;
-        }
-      });
-      
-      const topBrands = Object.entries(brandCount)
-        .sort(([,a], [,b]) => b - a)
-        .slice(0, 5);
-      
-      console.log('🏷️  Top 5 marcas encontradas:');
-      topBrands.forEach(([brand, count]) => {
-        console.log(`   • ${brand}: ${count} productos`);
-      });
+    if (products.length > 0) {
+      console.log(`   ✅ ${products.length} productos encontrados\n`);
+      allProducts.push(...products);
+    } else {
+      console.log(`   ❌ Sin resultados\n`);
     }
+  }
+
+  console.log('=' .repeat(50));
+  console.log(`📊 TOTAL: ${allProducts.length} productos encontrados\n`);
+
+  if (allProducts.length > 0) {
+    console.log('📦 PRODUCTOS OBTENIDOS:');
+    console.log('-'.repeat(50));
     
-  } catch (error) {
-    console.error('❌ Error durante el test:', error.message);
-    console.error('Stack trace:', error.stack);
+    allProducts.forEach((p, i) => {
+      console.log(`\n[${i + 1}] ${p.name}`);
+      console.log(`    EAN: ${p.ean}`);
+      console.log(`    Precio: $${p.price}`);
+      console.log(`    Marca: ${p.brand}`);
+      console.log(`    Link: ${p.link}`);
+    });
   }
 }
 
-test();
+test().catch(console.error);

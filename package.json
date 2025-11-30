@@ -7,7 +7,21 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "node test-scraper.js"
+    "scrape:all": "node scripts/populate-db.js all",
+    "scrape:disco": "node scripts/populate-db.js disco",
+    "scrape:carrefour": "node scripts/populate-db.js carrefour",
+    "scrape:jumbo": "node scripts/populate-db.js jumbo",
+    "scrape:vea": "node scripts/populate-db.js vea",
+    "scrape:dia": "node scripts/populate-db.js dia",
+    "scrape:masonline": "node scripts/populate-db.js masonline",
+    "scrape:farmacity": "node scripts/populate-db.js farmacity",
+    "test:vea": "node scraper-tests/test-vea.js",
+    "test:jumbo": "node scraper-tests/test-jumbo.js",
+    "test:carrefour": "node scraper-tests/test-carrefour.js",
+    "test:disco": "node scraper-tests/test-disco.js",
+    "test:dia": "node scraper-tests/test-diaonline.js",
+    "test:masonline": "node scraper-tests/test-masonline.js",
+    "test:farmacity": "node scraper-tests/test-farmacity.js"
   },
   "keywords": [
     "nodejs",
