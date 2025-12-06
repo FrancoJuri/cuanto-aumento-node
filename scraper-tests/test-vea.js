@@ -42,6 +42,7 @@ async function test() {
       console.log(`    Precio: $${p.price}`);
       console.log(`    Marca: ${p.brand}`);
       console.log(`    Link: ${p.link}`);
+      console.log(p);
     });
   }
 }
