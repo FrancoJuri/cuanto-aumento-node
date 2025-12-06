@@ -208,9 +208,26 @@ function normalizeProduct(rawProduct, baseUrl, source) {
   // Extraer todas las imágenes
   const images = item.images.map(img => img.imageUrl);
 
+  // Definir seller antes de calcular precios
+  // VTEX suele tener commertialOffer.AvailableQuantity o sellers[0].commertialOffer.AvailableQuantity
+  const seller = item.sellers?.find(s => s.sellerDefault) || item.sellers?.[0];
+
   // Precios
-  const sellingPrice = rawProduct.priceRange.sellingPrice.lowPrice;
-  const listPrice = rawProduct.priceRange.listPrice?.lowPrice || sellingPrice;
+  // Cambiamos a usar la oferta comercial del vendedor (commertialOffer) del SKU
+  // Esto es más preciso que product.priceRange que puede traer valores de otros SKUs o vendedores.
+  let sellingPrice = 0;
+  let listPrice = 0;
+  
+  if (seller && seller.commertialOffer) {
+    sellingPrice = seller.commertialOffer.Price;
+    // ListPrice en VTEX (Cencosud) viene con un valor erróneo (x82 aprox).
+    // Usamos PriceWithoutDiscount que parece ser el correcto.
+    listPrice = seller.commertialOffer.PriceWithoutDiscount || sellingPrice;
+  } else {
+    // Fallback a priceRange si no hay info en seller (raro)
+    sellingPrice = rawProduct.priceRange.sellingPrice.lowPrice;
+    listPrice = rawProduct.priceRange.listPrice?.lowPrice || sellingPrice;
+  }
 
   // Calculo de precio de referencia (ej: precio x litro)
   // VTEX suele devolver measurementUnit y unitMultiplier en el item
@@ -220,17 +237,11 @@ function normalizeProduct(rawProduct, baseUrl, source) {
   if (item.unitMultiplier && item.unitMultiplier > 0) {
     // Si el sellingPrice es por la unidad de venta (ej: botella 1.5L sale $1500)
     // y el unitMultiplier es 1.5, el precio por litro sería 1500 / 1.5 = 1000.
-    // OJO: Depende de cómo venga el precio en VTEX, a veces el precio ya es por unidad. 
-    // Pero usualmente priceRange es el precio del "bulto".
     referencePrice = sellingPrice / item.unitMultiplier;
   }
 
   // Stock / Disponibilidad
-  // VTEX suele tener commertialOffer.AvailableQuantity o sellers[0].commertialOffer.AvailableQuantity
-  // Pero aquí estamos usando el objeto 'product' de búsqueda, que tiene estructura simplificada a veces.
-  // Usamos el flag commertialOffer del primer vendedor si existe.
   let isAvailable = true;
-  const seller = item.sellers?.find(s => s.sellerDefault) || item.sellers?.[0];
   if (seller && seller.commertialOffer) {
      isAvailable = seller.commertialOffer.AvailableQuantity > 0;
   }
