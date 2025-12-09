@@ -183,7 +183,7 @@ function encodeQuery(query, count) {
 /**
  * Normaliza un producto de la respuesta de VTEX al formato estándar
  */
-function normalizeProduct(rawProduct, baseUrl, source) {
+export function normalizeProduct(rawProduct, baseUrl, source) {
   // Verificaciones de seguridad
   if (!rawProduct.items || rawProduct.items.length === 0) {
     return null;
