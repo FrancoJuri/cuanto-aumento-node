@@ -20,27 +20,7 @@ const SUPERMARKET_URLS = {
 };
 
 /**
- * 1. API RÁPIDA: Busca por ID directo (Opción Preferida)
- */
-async function getVtexProductById(baseUrl, externalId, source) {
-  try {
-    const url = `${baseUrl}/api/catalog_system/pub/products/search?fq=productId:${externalId}`;
-    const { data } = await axios.get(url, { timeout: 10000 });
-
-    if (!data || data.length === 0) return null; // Producto no existe o inactivo
-
-    return normalizeProduct(data[0], baseUrl, source);
-  } catch (error) {
-    if (error.response && error.response.status === 404) {
-        return null; 
-    }
-    console.error(`Error fetching ID ${externalId} from ${baseUrl}:`, error.message);
-    return null;
-  }
-}
-
-/**
- * 2. API FALLBACK: Busca por EAN (Opción de Recuperación)
+ * Busca producto por EAN
  */
 async function getVtexProductByEan(baseUrl, ean, source) {
     try {
@@ -93,7 +73,9 @@ async function getVtexProductByEan(baseUrl, ean, source) {
  * 3. FUNCIÓN PRINCIPAL DEL CRON
  */
 async function runPriceUpdater() {
+  const startTime = Date.now();
   console.log('⏰ Iniciando actualización de precios...');
+  console.log(`🕐 Hora de inicio: ${new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}`);
 
   if (!process.env.VTEX_SHA256_HASH) {
       console.error("❌ FALTA VTEX_SHA256_HASH en .env");
@@ -114,7 +96,7 @@ async function runPriceUpdater() {
     `)
     .not('supermarkets', 'is', null) // asegurar que trajo el supermercado
     .order('last_checked_at', { ascending: true, nullsFirst: true }) // Los más viejos o nunca revisados primero
-    .limit(200); // Lote de 200
+    .limit(500); 
 
   if (error) {
     console.error('Error obteniendo productos:', error);
@@ -130,39 +112,49 @@ async function runPriceUpdater() {
 
   let updatedCount = 0;
   let unavailableCount = 0;
+  let priceChangedCount = 0;
+  let errorCount = 0;
 
-  // B. Iterar sobre cada producto
-  for (const item of productsToUpdate) {
+  // B. Función auxiliar para dividir en batches
+  const chunkArray = (array, size) => {
+    const chunks = [];
+    for (let i = 0; i < array.length; i += size) {
+      chunks.push(array.slice(i, i + size));
+    }
+    return chunks;
+  };
+
+  // C. Función para procesar un producto individual
+  const processProduct = async (item, index, total) => {
     const supermarketName = item.supermarkets?.name;
     const baseUrl = SUPERMARKET_URLS[supermarketName];
 
     if (!baseUrl) {
       console.warn(`⚠️ URL no configurada para ${supermarketName} (ID: ${item.supermarket_id})`);
-      continue;
+      return { success: false, reason: 'no_url' };
     }
 
-    const ean = item.product_ean; // EAN directo de la tabla
+    const ean = item.product_ean;
+    
+    console.log(`[${index + 1}/${total}] 🔍 ${supermarketName} | EAN: ${ean}`);
 
-    // Rate Limiting simple
-    await new Promise(r => setTimeout(r, 100)); 
-
-    // C. Consultar API VTEX
+    // Consultar API VTEX por EAN
     let newData = null;
 
-    // C.1. Intentar por ID externo si existe
-    if (item.external_id) {
-        newData = await getVtexProductById(baseUrl, item.external_id, supermarketName.toLowerCase());
-    }
-
-    // C.2. Si falló por ID y tenemos EAN, intentar recuperación por EAN
-    if (!newData && ean) {
-        // console.log(`   🔄 Recuperando por EAN ${ean} para ${supermarketName}...`);
+    if (ean) {
         newData = await getVtexProductByEan(baseUrl, ean, supermarketName.toLowerCase());
+        if (newData) {
+            console.log(`   ✅ Encontrado - Precio: $${newData.price}`);
+        } else {
+            console.log(`   ❌ No encontrado`);
+        }
+    } else {
+        console.log(`   ⚠️  Producto sin EAN, saltando...`);
+        return { success: false, reason: 'no_ean' };
     }
 
     if (newData) {
-      // D. Si encontramos datos frescos
-      
+      // Si encontramos datos frescos
       const hasPriceChanged = Math.abs(parseFloat(newData.price) - parseFloat(item.price)) > 0.01;
       
       const updateData = {
@@ -170,37 +162,40 @@ async function runPriceUpdater() {
         is_available: newData.is_available,
         list_price: newData.list_price,
         price: newData.price,
-        // Si recuperamos por EAN, asegurarnos de guardar el external_id para la próxima ser más rápidos
+        reference_price: newData.reference_price,
+        reference_unit: newData.reference_unit,
         external_id: newData.external_id 
       };
 
-      // E. Guardar en DB
+      // Guardar en DB
       const { error: updateError } = await supabase
         .from('supermarket_products')
         .update(updateData)
         .eq('id', item.id);
 
       if (!updateError) {
-        // F. Si el precio cambió, guardamos en el HISTORIAL
+        // Si el precio cambió, guardamos en el HISTORIAL
         if (hasPriceChanged) {
-          console.log(`💰 Cambio ${supermarketName}: $${item.price} -> $${newData.price} (${ean || item.id})`);
+          console.log(`   💰 Cambio de precio: $${item.price} -> $${newData.price}`);
           await supabase.from('price_history').insert({
             supermarket_product_id: item.id,
             price: newData.price,
             list_price: newData.list_price,
             scraped_at: new Date().toISOString()
           });
+          return { success: true, priceChanged: true };
+        } else {
+          console.log(`   ✔️  Precio sin cambio: $${item.price}`);
+          return { success: true, priceChanged: false };
         }
-        updatedCount++;
       } else {
-          console.error(`Error actualizando producto ${item.id}:`, updateError.message);
+          console.error(`   ⚠️  Error actualizando producto ${item.id}:`, updateError.message);
+          return { success: false, reason: 'db_error' };
       }
 
     } else {
-        // G. No se encontró el producto (ni por ID ni por EAN)
-        // Probablemente descontinuado. Lo marcamos como no disponible.
-        unavailableCount++;
-        // console.log(`   ❌ No encontrado en ${supermarketName}. Marcando no disponible.`);
+        // No se encontró el producto por EAN
+        console.log(`   ⛔ Marcando como no disponible`);
         await supabase
             .from('supermarket_products')
             .update({ 
@@ -208,10 +203,75 @@ async function runPriceUpdater() {
                 last_checked_at: new Date().toISOString() 
             })
             .eq('id', item.id);
+        return { success: false, reason: 'not_found' };
+    }
+  };
+
+  // D. Procesar en batches paralelos
+  const BATCH_SIZE = 10; // 10 requests simultáneos
+  const batches = chunkArray(productsToUpdate, BATCH_SIZE);
+  
+  let processedCount = 0;
+
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i];
+    const batchStartTime = Date.now();
+    
+    console.log(`\n🔄 Procesando batch ${i + 1}/${batches.length} (${batch.length} productos)...`);
+    
+    // Procesar todos los productos del batch en paralelo
+    const results = await Promise.allSettled(
+      batch.map((item, idx) => processProduct(item, processedCount + idx, productsToUpdate.length))
+    );
+
+    // Contar resultados
+    results.forEach(result => {
+      if (result.status === 'fulfilled') {
+        const value = result.value;
+        if (value.success) {
+          updatedCount++;
+          if (value.priceChanged) priceChangedCount++;
+        } else if (value.reason === 'not_found') {
+          unavailableCount++;
+        } else {
+          errorCount++;
+        }
+      } else {
+        errorCount++;
+        console.error(`   ❌ Error en promesa:`, result.reason);
+      }
+    });
+
+    processedCount += batch.length;
+    
+    const batchTime = ((Date.now() - batchStartTime) / 1000).toFixed(2);
+    console.log(`✅ Batch ${i + 1} completado en ${batchTime}s`);
+    
+    // Rate limiting entre batches (excepto el último)
+    if (i < batches.length - 1) {
+      await new Promise(r => setTimeout(r, 500));
     }
   }
 
-  console.log(`🏁 Fin del lote. Actualizados: ${updatedCount} | No Disponibles: ${unavailableCount}`);
+  // H. Estadísticas finales
+  const endTime = Date.now();
+  const totalTime = (endTime - startTime) / 1000; // en segundos
+  const avgTimePerProduct = ((endTime - startTime) / productsToUpdate.length).toFixed(0); // en ms
+
+  console.log('\n' + '='.repeat(60));
+  console.log('📊 RESUMEN DE EJECUCIÓN');
+  console.log('='.repeat(60));
+  console.log(`🕐 Hora de finalización: ${new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })}`);
+  console.log(`⏱️  Tiempo total: ${totalTime.toFixed(2)}s (${(totalTime / 60).toFixed(2)} minutos)`);
+  console.log(`⚡ Tiempo promedio por producto: ${avgTimePerProduct}ms`);
+  console.log(`\n📦 Productos procesados: ${productsToUpdate.length}`);
+  console.log(`   ✅ Actualizados exitosamente: ${updatedCount} (${((updatedCount / productsToUpdate.length) * 100).toFixed(1)}%)`);
+  console.log(`   💰 Con cambio de precio: ${priceChangedCount} (${((priceChangedCount / productsToUpdate.length) * 100).toFixed(1)}%)`);
+  console.log(`   ❌ No disponibles/descontinuados: ${unavailableCount}`);
+  if (errorCount > 0) {
+    console.log(`   ⚠️  Errores al actualizar: ${errorCount}`);
+  }
+  console.log('='.repeat(60) + '\n');
 }
 
 // Ejecutar
