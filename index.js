@@ -1,11 +1,15 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { getCarrefourMainProducts } from './scrapers/carrefour.js';
-import { getDiscoMainProducts } from './scrapers/disco.js';
 
-// Configurar variables de entorno
+// Configurar variables de entorno (antes de cualquier import que los use)
 dotenv.config();
+
+// Importar config (esto inicializa Redis con logs)
+import './config/redis.js';
+
+// Importar rutas de la API
+import productRoutes from './routes/productRoutes.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,16 +19,30 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ============================================
+// 🚀 API ROUTES
+// ============================================
+app.use('/api', productRoutes);
+
+// ============================================
+// 📊 INFO ROUTES
+// ============================================
+
 // Ruta básica de información
 app.get('/', (req, res) => {
   res.json({
-    message: '🛒 Cuanto Aumento - Scraper de Productos Principales',
-    description: 'API para obtener productos de supermercados',
+    message: '🛒 Cuanto Aumento - API de Precios de Supermercados',
+    description: 'API para consultar productos y precios históricos',
     timestamp: new Date().toISOString(),
     endpoints: [
-      'GET /products/carrefour - Obtener productos de Carrefour',
-      'GET /products/disco - Obtener productos de Disco (MAESTRO)'
-    ]
+      'GET /api/products - Lista paginada de productos con precios',
+      'GET /api/products/search?q=... - Buscar productos',
+      'GET /api/products/category/:category - Productos por categoría',
+      'GET /api/products/:ean - Detalle con historial de precios',
+      'GET /api/products/:ean/cheapest - Supermercado más barato',
+      'GET /api/categories - Lista de categorías',
+      'GET /api/stats/categories - Estadísticas por categoría',
+    ],
   });
 });
 
@@ -32,70 +50,38 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
-    message: 'Servidor funcionando correctamente'
+    message: 'Servidor funcionando correctamente',
+    timestamp: new Date().toISOString(),
   });
 });
 
-// 🎯 ENDPOINT CARREFOUR
-app.get('/products/carrefour', async (req, res) => {
-  try {
-    console.log('🚀 Iniciando obtención de productos de Carrefour...');
-    const result = await getCarrefourMainProducts();
-    if (result.success) {
-      res.json(result);
-    } else {
-      res.status(500).json(result);
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// 🎯 ENDPOINT DISCO (MAESTRO)
-app.get('/products/disco', async (req, res) => {
-  try {
-    console.log('🚀 Iniciando obtención de productos de Disco (MAESTRO)...');
-    const result = await getDiscoMainProducts();
-    if (result.success) {
-      res.json(result);
-    } else {
-      res.status(500).json(result);
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Mantener compatibilidad con ruta anterior (redirecciona a Carrefour por defecto)
-app.get('/products', async (req, res) => {
-  res.redirect('/products/carrefour');
-});
+// ============================================
+// ❌ ERROR HANDLING
+// ============================================
 
 // Manejo de rutas no encontradas
 app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Ruta no encontrada',
     message: `La ruta ${req.originalUrl} no existe`,
-    availableEndpoints: [
-      'GET / - Información del servicio',
-      'GET /health - Estado del servidor',
-      'GET /products - Obtener productos principales'
-    ]
+    hint: 'Visita GET / para ver los endpoints disponibles',
   });
 });
 
-// Manejo de errores
+// Manejo de errores globales
 app.use((error, req, res, next) => {
   console.error('Error:', error);
   res.status(500).json({
     error: 'Error interno del servidor',
-    message: error.message
+    message: error.message,
   });
 });
 
 // Iniciar servidor
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor ejecutándose en http://localhost:${PORT}`);
-  console.log(`🛒 Endpoint principal: GET /products`);
-  console.log(`📊 Obtiene ~200 productos principales de Carrefour\n`);
-}); 
+  console.log(`\n🚀 Servidor ejecutándose en http://localhost:${PORT}`);
+  console.log(`📦 API Principal: GET /api/products`);
+  console.log(`🔍 Búsqueda: GET /api/products/search?q=...`);
+  console.log(`📊 Categorías: GET /api/categories\n`);
+});
+
