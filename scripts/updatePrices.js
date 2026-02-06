@@ -93,7 +93,7 @@ async function runPriceUpdater() {
     `)
     .not('supermarkets', 'is', null) // asegurar que trajo el supermercado
     .order('last_checked_at', { ascending: true, nullsFirst: true }) // Los más viejos o nunca revisados primero
-    .limit(500); 
+    .limit(2500); 
 
   if (error) {
     console.error('Error obteniendo productos:', error);
@@ -199,7 +199,7 @@ async function runPriceUpdater() {
   };
 
   // D. Procesamiento paralelo optimizado con p-limit
-  const CONCURRENCY_LIMIT = 20;
+  const CONCURRENCY_LIMIT = 30;
   const limit = pLimit(CONCURRENCY_LIMIT);
   console.log(`🚀 Ejecutando con concurrencia: ${CONCURRENCY_LIMIT} requests paralelos`);
 
