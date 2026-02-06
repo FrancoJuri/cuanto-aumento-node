@@ -15,7 +15,6 @@ console.log('2. Abre las herramientas de desarrollo (F12)');
 console.log('3. Ve a la pestaña "Network" o "Red"');
 console.log('4. Busca cualquier producto (ej: "a")');
 console.log('5. Busca un request que contenga "operationName=productSuggestions"');
-console.log('   (igual que en el proyecto de Go)');
 console.log('6. Copia la URL completa del request y pégala aquí\n');
 
 rl.question('🔗 Pega la URL del request: ', (inputUrl) => {
@@ -72,7 +71,7 @@ rl.question('🔗 Pega la URL del request: ', (inputUrl) => {
     console.log('\n💡 Consejos:');
     console.log('- Asegúrate de copiar la URL completa del request');
     console.log('- La URL debe ser de una búsqueda de productos');
-    console.log('- Busca específicamente "productSuggestions" (como en el proyecto Go)');
+    console.log('- Busca específicamente "productSuggestions"');
     console.log('- Prueba buscando un producto simple como "a" o "arroz"');
     console.log('- Si solo ves "ProductQuery", es posible que el supermercado haya cambiado');
   }
