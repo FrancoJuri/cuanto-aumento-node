@@ -1,5 +1,7 @@
 import axios from 'axios';
 import { supabase } from '../config/supabase.js';
+import pLimit from 'p-limit';
+import httpClient from './httpClient.js';
 /**
  * Obtiene o crea el ID del supermercado
  */
@@ -49,47 +51,59 @@ export async function scrapeVtexSupermarket({ supermarketName, baseUrl, categori
   } else {
     console.warn('⚠️ Supabase no disponible. Saltando guardado en DB.');
   }
-  console.log(`📋 Buscando en ${categories.length} categorías`);
+  
+  const CONCURRENCY_LIMIT = 30; 
+  const limit = pLimit(CONCURRENCY_LIMIT);
+  
+  console.log(`📋 Buscando en ${categories.length} categorías/items con concurrencia de ${CONCURRENCY_LIMIT}`);
   
   const allProducts = new Map();
   let successfulQueries = 0;
   let savedCount = 0;
-  let skippedCount = 0; // Para contar productos ignorados (ej: no en maestro)
+  let skippedCount = 0;
   
-  for (let i = 0; i < categories.length; i++) {
-    const category = categories[i];
-    console.log(`[${i+1}/${categories.length}] 🔍 Categoría: "${category}"`);
-    
-    const products = await fetchVtexProducts(baseUrl, category, sourceName, count);
-    
-    if (products.length > 0) {
-      for (const product of products) {
-        if (!allProducts.has(product.ean)) {
-          allProducts.set(product.ean, product);
-          
-          // Ejecutar lógica específica de guardado si hay conexión
-          if (supermarketId && onProductFound) {
-            const result = await onProductFound(product, supermarketId);
-            if (result === true || result?.saved === true) {
-              savedCount++;
-            } else if (result?.reason === 'not_in_master') {
-              skippedCount++;
+  // Procesamiento paralelo
+  const promises = categories.map((category, index) => {
+    return limit(async () => {
+      // Log reducido para no llenar la consola si son muchos
+      if (categories.length < 50 || index % 50 === 0) {
+        console.log(`[${index + 1}/${categories.length}] 🔍 Procesando: "${category}"`);
+      }
+
+      const products = await fetchVtexProducts(baseUrl, category, sourceName, count);
+      let localSaved = 0;
+      let localSkipped = 0;
+
+      if (products.length > 0) {
+        for (const product of products) {
+          if (!allProducts.has(product.ean)) {
+            allProducts.set(product.ean, product);
+            
+            if (supermarketId && onProductFound) {
+              const result = await onProductFound(product, supermarketId);
+              if (result === true || result?.saved === true) {
+                localSaved++;
+              } else if (result?.reason === 'not_in_master') {
+                localSkipped++;
+              }
             }
           }
         }
+        return { success: true, saved: localSaved, skipped: localSkipped, found: products.length };
       }
-      
-      console.log(`   ✅ ${products.length} productos encontrados`);
-      successfulQueries++;
-    } else {
-      console.log(`   ❌ Sin resultados`);
-    }
-    
-    // Pequeña pausa para no saturar
-    if (i < categories.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
-  }
+      return { success: false, saved: 0, skipped: 0, found: 0 };
+    });
+  });
+
+  const results = await Promise.all(promises);
+
+  // Agregar resultados
+  results.forEach(r => {
+    if (r.success) successfulQueries++;
+    savedCount += r.saved;
+    skippedCount += r.skipped;
+  });
+
   const uniqueProducts = Array.from(allProducts.values());
   console.log(`\n🎉 Scraping completado para ${supermarketName}:`);
   console.log(`   📊 Total productos únicos encontrados: ${uniqueProducts.length}`);
@@ -101,7 +115,7 @@ export async function scrapeVtexSupermarket({ supermarketName, baseUrl, categori
     success: true,
     source: sourceName,
     totalProducts: uniqueProducts.length,
-    savedProducts: savedCount, // Mantenemos nombre genérico, puede ser precios o productos
+    savedProducts: savedCount, 
     skippedProducts: skippedCount,
     timestamp: new Date().toISOString(),
     products: uniqueProducts
@@ -284,20 +298,16 @@ export async function fetchVtexProducts(baseUrl, query, source, count = 50) {
   const endpoint = `${cleanBaseUrl}/_v/segment/graphql/v1/`;
   const url = endpoint + encodeQuery(query, count);
   try {
-    const response = await axios.get(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'application/json'
-      },
-      timeout: 15000
-    });
+    // Usamos httpClient para automanejo de retries y keep-alive
+    const response = await httpClient.get(url);
     const data = response.data;
     
     if (data.errors && data.errors.length > 0) {
       throw new Error(`API Error: ${data.errors[0].message}`);
     }
     if (!data.data || !data.data.productSuggestions || !data.data.productSuggestions.products) {
-      throw new Error('Estructura de respuesta inesperada de la API');
+      // A veces VTEX devuelve null si no hay resultados en lugar de array vacío, chequeamos
+      return []; 
     }
     const rawProducts = data.data.productSuggestions.products;
     
@@ -306,7 +316,11 @@ export async function fetchVtexProducts(baseUrl, query, source, count = 50) {
       .filter(product => product !== null);
     return normalizedProducts;
   } catch (error) {
-    console.error(`❌ Error buscando "${query}" en ${source}:`, error.message);
+    // Logueamos solo si no es 404 (que en search suele ser raro, pero por si acaso)
+    // Para simplificar, silenciamos un poco los errores "no encontrado" si son muchos en paralelo
+    if (error.response?.status !== 404) {
+       // console.error(`❌ Error buscando "${query}" en ${source}:`, error.message);
+    }
     return [];
   }
 }

@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import axios from 'axios';
 import dotenv from 'dotenv';
 import { normalizeProduct } from '../cores/vtex.js';
+import pLimit from 'p-limit';
+import httpClient from '../cores/httpClient.js';
 
 dotenv.config();
 
@@ -42,12 +44,7 @@ async function getVtexProductByEan(baseUrl, ean, source) {
           })).toString('base64')
       }))}`;
   
-      const { data } = await axios.get(url, { 
-        headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        },
-        timeout: 15000 
-      });
+      const { data } = await httpClient.get(url);
 
       if (data.errors || !data.data || !data.data.productSuggestions || !data.data.productSuggestions.products || data.data.productSuggestions.products.length === 0) {
           return null;
@@ -116,13 +113,7 @@ async function runPriceUpdater() {
   let errorCount = 0;
 
   // B. Función auxiliar para dividir en batches
-  const chunkArray = (array, size) => {
-    const chunks = [];
-    for (let i = 0; i < array.length; i += size) {
-      chunks.push(array.slice(i, i + size));
-    }
-    return chunks;
-  };
+
 
   // C. Función para procesar un producto individual
   const processProduct = async (item, index, total) => {
@@ -207,51 +198,27 @@ async function runPriceUpdater() {
     }
   };
 
-  // D. Procesar en batches paralelos
-  const BATCH_SIZE = 10; // 10 requests simultáneos
-  const batches = chunkArray(productsToUpdate, BATCH_SIZE);
-  
-  let processedCount = 0;
+  // D. Procesamiento paralelo optimizado con p-limit
+  const CONCURRENCY_LIMIT = 20;
+  const limit = pLimit(CONCURRENCY_LIMIT);
+  console.log(`🚀 Ejecutando con concurrencia: ${CONCURRENCY_LIMIT} requests paralelos`);
 
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i];
-    const batchStartTime = Date.now();
-    
-    console.log(`\n🔄 Procesando batch ${i + 1}/${batches.length} (${batch.length} productos)...`);
-    
-    // Procesar todos los productos del batch en paralelo
-    const results = await Promise.allSettled(
-      batch.map((item, idx) => processProduct(item, processedCount + idx, productsToUpdate.length))
-    );
-
-    // Contar resultados
-    results.forEach(result => {
-      if (result.status === 'fulfilled') {
-        const value = result.value;
-        if (value.success) {
-          updatedCount++;
-          if (value.priceChanged) priceChangedCount++;
-        } else if (value.reason === 'not_found') {
-          unavailableCount++;
-        } else {
-          errorCount++;
-        }
-      } else {
-        errorCount++;
-        console.error(`   ❌ Error en promesa:`, result.reason);
-      }
+  const promises = productsToUpdate.map((item, index) => {
+    return limit(async () => {
+       const result = await processProduct(item, index, productsToUpdate.length);
+       if (result.success) {
+         updatedCount++;
+         if (result.priceChanged) priceChangedCount++;
+       } else if (result.reason === 'not_found') {
+         unavailableCount++;
+       } else {
+         errorCount++;
+       }
+       return result;
     });
+  });
 
-    processedCount += batch.length;
-    
-    const batchTime = ((Date.now() - batchStartTime) / 1000).toFixed(2);
-    console.log(`✅ Batch ${i + 1} completado en ${batchTime}s`);
-    
-    // Rate limiting entre batches (excepto el último)
-    if (i < batches.length - 1) {
-      await new Promise(r => setTimeout(r, 500));
-    }
-  }
+  await Promise.all(promises);
 
   // H. Estadísticas finales
   const endTime = Date.now();
