@@ -1,0 +1,51 @@
+name: Manual Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      scraper:
+        description: 'Supermarket to scrape'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - disco
+          - jumbo
+          - vea
+          - carrefour
+          - dia
+          - masonline
+          - farmacity
+      mode:
+        description: 'Scraping Mode'
+        required: true
+        default: 'eans'
+        type: choice
+        options:
+          - eans
+          - categories
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Scraper
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          VTEX_SHA256_HASH: ${{ secrets.VTEX_SHA256_HASH }}
+        run: node scripts/populate-db.js ${{ inputs.scraper }} ${{ inputs.mode }}
