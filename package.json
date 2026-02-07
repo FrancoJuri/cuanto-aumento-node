@@ -21,7 +21,8 @@
     "test:disco": "node scraper-tests/test-disco.js",
     "test:dia": "node scraper-tests/test-diaonline.js",
     "test:masonline": "node scraper-tests/test-masonline.js",
-    "test:farmacity": "node scraper-tests/test-farmacity.js"
+    "test:farmacity": "node scraper-tests/test-farmacity.js",
+    "cache:clear": "node scripts/clear-cache.js"
   },
   "keywords": [
     "nodejs",
