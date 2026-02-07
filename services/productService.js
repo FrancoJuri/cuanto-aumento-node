@@ -30,7 +30,8 @@ export async function getProducts({ page = 1, limit = 20, sort = 'name' }) {
 
   // Ordenamiento
   if (sort === 'name') {
-    query = query.order('name', { ascending: true });
+    // Default sorting now prioritizes relevance
+    query = query.order('relevance', { ascending: false }).order('name', { ascending: true });
   }
   
   // Paginación sobre productos únicos
