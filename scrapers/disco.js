@@ -1,6 +1,7 @@
 import { scrapeVtexSupermarket } from '../cores/vtex.js';
 import { saveMasterProduct } from '../cores/saveHandlers.js';
-import { DETAILED_CATEGORIES, productEans } from '../cores/categories.js';
+import { DETAILED_CATEGORIES } from '../cores/categories.js';
+import { getAllProductEans } from '../cores/dbUtils.js';
 
 const BASE_URL = 'https://www.disco.com.ar';
 
@@ -9,10 +10,17 @@ const BASE_URL = 'https://www.disco.com.ar';
  */
 export async function getDiscoMainProducts(mode = 'categories') {
   const useEans = mode === 'eans';
+  
+  let categoriesToScrape = DETAILED_CATEGORIES;
+
+  if (useEans) {
+    categoriesToScrape = await getAllProductEans();
+  }
+
   return await scrapeVtexSupermarket({
     supermarketName: 'Disco',
     baseUrl: BASE_URL,
-    categories: useEans ? productEans : DETAILED_CATEGORIES,
+    categories: categoriesToScrape,
     onProductFound: saveMasterProduct,
     count: useEans ? 1 : 50
   });

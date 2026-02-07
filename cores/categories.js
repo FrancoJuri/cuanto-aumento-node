@@ -316,6 +316,3 @@ export const DETAILED_CATEGORIES = [
   "Húmedos"
 ];
 
-export const productEans = process.env.PRODUCT_EANS
-  ? JSON.parse(process.env.PRODUCT_EANS)
-  : [];
