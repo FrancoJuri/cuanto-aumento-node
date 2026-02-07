@@ -1,98 +1,84 @@
 import { supabase } from '../config/supabase.js';
 
 /**
- * Obtiene lista paginada de productos que tienen precios en supermercados
- * Query desde supermarket_products para mostrar solo productos disponibles
+ * Obtiene lista paginada de productos disponibles
+ * Query desde products para correcta paginación y agrupación
  */
 export async function getProducts({ page = 1, limit = 20, sort = 'name' }) {
   const offset = (page - 1) * limit;
-  
-  // Primero obtenemos los EANs únicos de productos disponibles en supermercados
-  const { data: supermarketData, error: spError, count } = await supabase
-    .from('supermarket_products')
+
+  // Consulta principal a la tabla products
+  let query = supabase
+    .from('products')
     .select(`
-      product_ean,
-      price,
-      list_price,
-      is_available,
-      supermarkets (
-        name
-      ),
-      products (
-        ean,
-        name,
-        brand,
-        category,
-        image_url
+      ean,
+      name,
+      brand,
+      category,
+      image_url,
+      supermarket_products!inner (
+        price,
+        list_price,
+        is_available,
+        supermarkets (
+          name
+        )
       )
     `, { count: 'exact' })
-    .eq('is_available', true)
-    .not('price', 'is', null)
-    .order('product_ean', { ascending: true })
-    .range(offset, offset + limit - 1);
+    .eq('supermarket_products.is_available', true)
+    .not('supermarket_products.price', 'is', null);
 
-  if (spError) throw spError;
-
-  // Agrupar por producto (un producto puede estar en varios supermercados)
-  const productsMap = new Map();
-  
-  supermarketData.forEach(sp => {
-    const ean = sp.product_ean;
-    
-    if (!productsMap.has(ean)) {
-      productsMap.set(ean, {
-        ean: sp.products?.ean,
-        name: sp.products?.name,
-        brand: sp.products?.brand,
-        category: sp.products?.category,
-        image_url: sp.products?.image_url,
-        prices: [],
-        min_price: Infinity,
-      });
-    }
-    
-    const product = productsMap.get(ean);
-    product.prices.push({
-      supermarket: sp.supermarkets?.name,
-      price: sp.price,
-      list_price: sp.list_price,
-    });
-    
-    if (sp.price < product.min_price) {
-      product.min_price = sp.price;
-    }
-  });
-
-  // Convertir a array y ordenar
-  let products = Array.from(productsMap.values());
-  
-  // Ordenar según el parámetro sort
+  // Ordenamiento
   if (sort === 'name') {
-    products.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  } else if (sort === 'price') {
-    products.sort((a, b) => a.min_price - b.min_price);
+    query = query.order('name', { ascending: true });
+  }
+  
+  // Paginación sobre productos únicos
+  query = query.range(offset, offset + limit - 1);
+
+  const { data: products, error, count } = await query;
+  
+  if (error) throw error;
+
+  // Procesar resultados
+  const processedProducts = products.map(product => {
+    // Filtrar precios nulos o no disponibles (aunque el query ya filtra la mayoría)
+    const validPrices = product.supermarket_products
+      .filter(sp => sp.is_available && sp.price !== null)
+      .map(sp => ({
+        supermarket: sp.supermarkets?.name,
+        price: sp.price,
+        list_price: sp.list_price,
+      }));
+
+    if (validPrices.length === 0) return null;
+
+    // Calcular precio mínimo
+    const min_price = Math.min(...validPrices.map(p => p.price));
+
+    return {
+      ean: product.ean,
+      name: product.name,
+      brand: product.brand,
+      category: product.category,
+      image_url: product.image_url,
+      prices: validPrices,
+      min_price,
+    };
+  }).filter(p => p !== null);
+
+  // Ordenamiento secundario en memoria si se requiere por precio (limitación del ORM/query actual)
+  if (sort === 'price') {
+    processedProducts.sort((a, b) => a.min_price - b.min_price);
   }
 
-  // Limpiar min_price Infinity
-  products = products.map(p => ({
-    ...p,
-    min_price: p.min_price === Infinity ? null : p.min_price,
-  }));
-
-  // Obtener conteo único de productos
-  const { count: uniqueCount } = await supabase
-    .from('supermarket_products')
-    .select('product_ean', { count: 'exact', head: true })
-    .eq('is_available', true)
-    .not('price', 'is', null);
-
   return {
-    products,
+    products: processedProducts,
     pagination: {
       page,
       limit,
-      total: uniqueCount || count,
-      totalPages: Math.ceil((uniqueCount || count) / limit),
+      total: count,
+      totalPages: Math.ceil(count / limit),
     },
   };
 }
