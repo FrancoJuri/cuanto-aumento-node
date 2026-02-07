@@ -11,13 +11,37 @@ import './config/redis.js';
 // Importar rutas de la API
 import productRoutes from './routes/productRoutes.js';
 
+import helmet from 'helmet';
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middlewares
-app.use(cors());
+app.use(helmet()); 
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGIN,
+  optionsSuccessStatus: 200
+}));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+app.set('trust proxy', 1);
+
+// Rate Limiting: Máximo 300 peticiones por 15 minutos
+import rateLimit from 'express-rate-limit';
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 300, // Límite de 300 peticiones por IP por ventana
+  standardHeaders: true, // Devuelve info de límites en los headers `RateLimit-*`
+  legacyHeaders: false, // Deshabilita los headers `X-RateLimit-*`
+  message: {
+    error: 'Too Many Requests',
+    message: 'Has excedido el límite de peticiones. Por favor intenta más tarde.',
+  },
+});
+
+app.use(limiter);
 
 // ============================================
 // 🚀 API ROUTES

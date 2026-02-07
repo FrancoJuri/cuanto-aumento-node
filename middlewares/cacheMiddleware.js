@@ -4,12 +4,12 @@ import { getCache, setCache } from '../config/redis.js';
  * TTL (Time To Live) en segundos para cada tipo de endpoint
  */
 export const CACHE_TTL = {
-  PRODUCTS_LIST: 300,      // 5 minutos
-  PRODUCTS_CATEGORY: 300,  // 5 minutos
-  PRODUCT_DETAIL: 600,     // 10 minutos
-  CATEGORIES: 3600,        // 1 hora
-  SEARCH: 120,             // 2 minutos
-  STATS: 3600,             // 1 hora
+  PRODUCTS_LIST: 86400,      // 24 horas
+  PRODUCTS_CATEGORY: 86400,  // 24 horas
+  PRODUCT_DETAIL: 86400,     // 24 horas
+  CATEGORIES: 86400,         // 24 horas
+  SEARCH: 3600,              // 1 hora
+  STATS: 86400,              // 24 horas
 };
 
 /**
