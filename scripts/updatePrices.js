@@ -80,24 +80,56 @@ async function runPriceUpdater() {
   }
 
   // A. Obtener un lote de productos "viejos"
-  // Esta vez, traemos TAMBIÉN el EAN por si falla el external_id
-  const { data: productsToUpdate, error } = await supabase
-    .from('supermarket_products')
-    .select(`
-      id, 
-      external_id,
-      product_ean,
-      price, 
-      supermarket_id, 
-      supermarkets ( name )
-    `)
-    .not('supermarkets', 'is', null) // asegurar que trajo el supermercado
-    .order('last_checked_at', { ascending: true, nullsFirst: true }) // Los más viejos o nunca revisados primero
-    .limit(2500); 
+  const TARGET_TOTAL = 2500;
+  let productsToUpdate = [];
+  let page = 0;
+  let hasMore = true;
 
-  if (error) {
-    console.error('Error obteniendo productos:', error);
-    return;
+  console.log(`📥 Buscando hasta ${TARGET_TOTAL} productos para actualizar...`);
+
+  // Loop para superar el limite de 1000 rows de Supabase
+  while (hasMore && productsToUpdate.length < TARGET_TOTAL) {
+    const remaining = TARGET_TOTAL - productsToUpdate.length;
+    // Si quedan menos de 1000 por pedir, pedimos solo esos. Si quedan más, pedimos 1000.
+    const limit = Math.min(remaining, 1000); 
+    
+    // Pagination (0-indexed page based on 1000 items per "full" page logic)
+    // Always step by 1000 to keep alignment consistent with Supabase pagination if needed, 
+    // though here we are just grabbing chunks.
+    const from = page * 1000;
+    const to = from + limit - 1;
+
+    const { data, error } = await supabase
+      .from('supermarket_products')
+      .select(`
+        id, 
+        external_id,
+        product_ean,
+        price, 
+        supermarket_id, 
+        supermarkets ( name )
+      `)
+      .not('supermarkets', 'is', null) // asegurar que trajo el supermercado
+      .order('last_checked_at', { ascending: true, nullsFirst: true }) // Los más viejos o nunca revisados primero
+      .range(from, to); 
+
+    if (error) {
+      console.error('Error obteniendo productos (batch ' + page + '):', error.message);
+      // Si falla un batch, detenemos la carga pero procesamos lo que ya tengamos
+      break; 
+    }
+
+    if (data && data.length > 0) {
+      productsToUpdate = productsToUpdate.concat(data);
+      page++;
+      
+      // Si nos devolvió menos de lo que pedimos (limit), es que no hay más
+      if (data.length < limit) {
+        hasMore = false; 
+      }
+    } else {
+      hasMore = false;
+    }
   }
 
   if (productsToUpdate.length === 0) {
