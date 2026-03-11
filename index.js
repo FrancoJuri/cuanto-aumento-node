@@ -28,13 +28,13 @@ app.use(express.urlencoded({ extended: true }));
 
 app.set('trust proxy', 1);
 
-// Rate Limiting: Máximo 300 peticiones por 15 minutos
+// Rate Limiting
 import rateLimit from 'express-rate-limit';
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 300, // Límite de 300 peticiones por IP por ventana
-  standardHeaders: true, // Devuelve info de límites en los headers `RateLimit-*`
-  legacyHeaders: false, // Deshabilita los headers `X-RateLimit-*`
+  max: 300,
+  standardHeaders: true, 
+  legacyHeaders: false, 
   message: {
     error: 'Too Many Requests',
     message: 'Has excedido el límite de peticiones. Por favor intenta más tarde.',
@@ -103,9 +103,9 @@ app.use((error, req, res, next) => {
 
 // Iniciar servidor
 app.listen(PORT, () => {
-  console.log(`\n🚀 Servidor ejecutándose en http://localhost:${PORT}`);
-  console.log(`📦 API Principal: GET /api/products`);
-  console.log(`🔍 Búsqueda: GET /api/products/search?q=...`);
-  console.log(`📊 Categorías: GET /api/categories\n`);
+  console.log(`\n Servidor ejecutándose en http://localhost:${PORT}`);
+  console.log(` API Principal: GET /api/products`);
+  console.log(` Búsqueda: GET /api/products/search?q=...`);
+  console.log(` Categorías: GET /api/categories\n`);
 });
 

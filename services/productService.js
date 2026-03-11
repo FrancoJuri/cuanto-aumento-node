@@ -1,13 +1,8 @@
 import { supabase } from '../config/supabase.js';
 
-/**
- * Obtiene lista paginada de productos disponibles
- * Query desde products para correcta paginación y agrupación
- */
 export async function getProducts({ page = 1, limit = 20, sort = 'name' }) {
   const offset = (page - 1) * limit;
 
-  // Consulta principal a la tabla products
   let query = supabase
     .from('products')
     .select(`
@@ -28,22 +23,17 @@ export async function getProducts({ page = 1, limit = 20, sort = 'name' }) {
     .eq('supermarket_products.is_available', true)
     .not('supermarket_products.price', 'is', null);
 
-  // Ordenamiento
   if (sort === 'name') {
-    // Default sorting now prioritizes relevance
     query = query.order('relevance', { ascending: false }).order('name', { ascending: true });
   }
   
-  // Paginación sobre productos únicos
   query = query.range(offset, offset + limit - 1);
 
   const { data: products, error, count } = await query;
   
   if (error) throw error;
 
-  // Procesar resultados
   const processedProducts = products.map(product => {
-    // Filtrar precios nulos o no disponibles (aunque el query ya filtra la mayoría)
     const validPrices = product.supermarket_products
       .filter(sp => sp.is_available && sp.price !== null)
       .map(sp => ({
@@ -54,7 +44,6 @@ export async function getProducts({ page = 1, limit = 20, sort = 'name' }) {
 
     if (validPrices.length === 0) return null;
 
-    // Calcular precio mínimo
     const min_price = Math.min(...validPrices.map(p => p.price));
 
     return {
@@ -68,7 +57,6 @@ export async function getProducts({ page = 1, limit = 20, sort = 'name' }) {
     };
   }).filter(p => p !== null);
 
-  // Ordenamiento secundario en memoria si se requiere por precio (limitación del ORM/query actual)
   if (sort === 'price') {
     processedProducts.sort((a, b) => a.min_price - b.min_price);
   }
@@ -84,9 +72,6 @@ export async function getProducts({ page = 1, limit = 20, sort = 'name' }) {
   };
 }
 
-/**
- * Obtiene productos por categoría
- */
 export async function getProductsByCategory({ category, page = 1, limit = 20 }) {
   const offset = (page - 1) * limit;
   
@@ -139,11 +124,8 @@ export async function getProductsByCategory({ category, page = 1, limit = 20 }) 
   };
 }
 
-/**
- * Obtiene detalle de un producto con historial de precios completo
- */
+
 export async function getProductByEan(ean) {
-  // Obtener producto base
   const { data: product, error: productError } = await supabase
     .from('products')
     .select('*')
@@ -152,12 +134,11 @@ export async function getProductByEan(ean) {
 
   if (productError) {
     if (productError.code === 'PGRST116') {
-      return null; // Producto no encontrado
+      return null; 
     }
     throw productError;
   }
 
-  // Obtener supermarket_products con historial
   const { data: supermarketProducts, error: spError } = await supabase
     .from('supermarket_products')
     .select(`
@@ -184,7 +165,7 @@ export async function getProductByEan(ean) {
 
   if (spError) throw spError;
 
-  // Formatear respuesta
+  
   const supermarkets = supermarketProducts.map(sp => ({
     name: sp.supermarkets?.name,
     price: sp.price,
@@ -304,9 +285,7 @@ export async function getCategories() {
   return { categories };
 }
 
-/**
- * Obtiene el supermercado más barato para un producto
- */
+
 export async function getCheapestForProduct(ean) {
   const { data: supermarketProducts, error } = await supabase
     .from('supermarket_products')
@@ -333,7 +312,7 @@ export async function getCheapestForProduct(ean) {
 
   const cheapest = supermarketProducts[0];
   
-  // Obtener todos los precios para comparación
+
   const { data: allPrices, error: allError } = await supabase
     .from('supermarket_products')
     .select(`
@@ -363,11 +342,9 @@ export async function getCheapestForProduct(ean) {
   };
 }
 
-/**
- * Obtiene estadísticas de variación de precios por categoría
- */
+
 export async function getCategoryStats() {
-  // Esta query es más compleja, la simplificamos obteniendo datos agregados
+  
   const { data: products, error } = await supabase
     .from('products')
     .select(`
@@ -381,7 +358,6 @@ export async function getCategoryStats() {
 
   if (error) throw error;
 
-  // Agregar por categoría
   const categoryStats = {};
   
   products.forEach(product => {
@@ -405,7 +381,6 @@ export async function getCategoryStats() {
       });
   });
 
-  // Calcular estadísticas
   const stats = Object.values(categoryStats).map(cat => {
     const prices = cat.prices;
     const avg = prices.length > 0 

@@ -34,6 +34,9 @@ export async function saveMasterProduct(product, supermarketId) {
         reference_price: product.reference_price,
         reference_unit: product.reference_unit,
         is_available: product.is_available,
+        sku_id: product.sku_id || null,
+        seller_id: product.seller_id || null,
+        seller_name: product.seller_name || null,
         last_checked_at: new Date().toISOString()
       }, { onConflict: 'product_ean, supermarket_id' })
       .select('id')
@@ -89,6 +92,9 @@ export async function saveFollowerProduct(product, supermarketId) {
         reference_price: product.reference_price,
         reference_unit: product.reference_unit,
         is_available: product.is_available,
+        sku_id: product.sku_id || null,
+        seller_id: product.seller_id || null,
+        seller_name: product.seller_name || null,
         last_checked_at: new Date().toISOString()
       }, { onConflict: 'product_ean, supermarket_id' })
       .select('id')

@@ -262,14 +262,13 @@ export function normalizeProduct(rawProduct, baseUrl, source) {
   
   return {
     ean: ean,
-    external_id: rawProduct.productId, // ID de producto en VTEX
+    external_id: rawProduct.productId,
     source: source,
     name: rawProduct.productName,
     link: `${baseUrl}/${rawProduct.linkText}/p`,
     image: images[0],
     images: images,
     
-    // Campos de precios normalizados
     price: sellingPrice,
     list_price: listPrice,
     reference_price: referencePrice,
@@ -277,12 +276,14 @@ export function normalizeProduct(rawProduct, baseUrl, source) {
     
     is_available: isAvailable,
 
-    // Mantenemos compatibilidad con campos viejos si es necesario, 
-    // o simplemente devolvemos este objeto enriquecido.
+    sku_id: item.itemId || null,
+    seller_id: seller?.sellerId || null,
+    seller_name: seller?.sellerName || null,
+
     brand: rawProduct.brand,
     categories: rawProduct.categories,
     description: rawProduct.description,
-    unavailable: !isAvailable // Deprecated, prefer is_available
+    unavailable: !isAvailable
   };
 }
 /**
