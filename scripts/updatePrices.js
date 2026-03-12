@@ -187,7 +187,10 @@ async function runPriceUpdater() {
         price: newData.price,
         reference_price: newData.reference_price,
         reference_unit: newData.reference_unit,
-        external_id: newData.external_id 
+        external_id: newData.external_id,
+        sku_id: newData.sku_id || null,
+        seller_id: newData.seller_id || null,
+        seller_name: newData.seller_name || null
       };
 
       // Guardar en DB

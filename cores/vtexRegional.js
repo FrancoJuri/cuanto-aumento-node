@@ -37,33 +37,16 @@ export const VTEX_ACCOUNTS = {
 
 // Postal codes for all Argentine provinces
 export const POSTAL_CODES = {
-  'CABA':             '1001',
-  'Buenos Aires':     '1900', // La Plata
-  'Catamarca':        '4700',
-  'Chaco':            '3500',
-  'Chubut':           '9100', // Rawson
-  'Córdoba':          '5000',
-  'Corrientes':       '3400',
-  'Entre Ríos':       '3100', // Paraná
-  'Formosa':          '3600',
-  'Jujuy':            '4600', // San Salvador
-  'La Pampa':         '6300', // Santa Rosa
-  'La Rioja':         '5300',
-  'Mendoza':          '5500',
-  'Misiones':         '3300', // Posadas
-  'Neuquén':          '8300',
-  'Río Negro':        '8500', // Viedma
-  'Salta':            '4400',
-  'San Juan':         '5400',
-  'San Luis':         '5700',
-  'Santa Cruz':       '9400', // Río Gallegos
-  'Santa Fe':         '3000',
-  'Santiago del Estero': '4200',
-  'Tierra del Fuego': '9410', // Ushuaia
-  'Tucumán':          '4000',
-  'Rosario':          '2000',
-  'Mar del Plata':    '7600',
-  'Bahía Blanca':     '8000',
+  'CABA': '1001',
+  'GBA Norte': '1602', // Vicente López
+  'La Plata': '1900',
+  'Rosario': '2000',
+  'Córdoba': '5000',
+  'Mendoza': '5500',
+  'Tucumán': '4000',
+  'Salta': '4400',
+  'Neuquén': '8300',
+  'Mar del Plata': '7600'
 };
 
 /**
@@ -99,10 +82,10 @@ export async function createVtexSession(directUrl, postalCode, country = 'ARG') 
 /**
  * Fetches a product by EAN using the Catalog System API with session cookies.
  */
-export async function getRegionalPrice(client, backendUrl, ean) {
+export async function getRegionalPrice(client, directUrl, ean) {
   try {
     const { data } = await client.get(
-      `${backendUrl}/api/catalog_system/pub/products/search?fq=alternateIds_Ean:${ean}`
+      `${directUrl}/api/catalog_system/pub/products/search?fq=alternateIds_Ean:${ean}`
     );
 
     if (!data || data.length === 0) return null;
@@ -145,23 +128,59 @@ async function getSupermarketId(name) {
   return data?.id || null;
 }
 
-/**
- * Saves a regional price to the database.
- * Upserts into regional_prices and inserts into regional_price_history if price changed.
- */
-async function saveRegionalPrice(product, supermarketId, postalCode, regionLabel) {
-  // First check if existing price differs to determine if history entry is needed
-  const { data: existing } = await supabase
-    .from('regional_prices')
-    .select('id, price')
-    .eq('product_ean', product.ean)
-    .eq('supermarket_id', supermarketId)
-    .eq('postal_code', postalCode)
-    .single();
+const BATCH_SIZE = 200;
 
-  const { data: rpData, error: rpError } = await supabase
-    .from('regional_prices')
-    .upsert({
+/**
+ * Fetches existing prices for a batch of EANs in a specific region.
+ * Returns a Map of ean -> { id, price }
+ */
+async function getExistingPrices(eans, supermarketId, postalCode) {
+  const priceMap = new Map();
+  // Supabase .in() supports up to 200-300 items safely
+  for (let i = 0; i < eans.length; i += BATCH_SIZE) {
+    const chunk = eans.slice(i, i + BATCH_SIZE);
+    const { data, error } = await supabase
+      .from('regional_prices')
+      .select('id, product_ean, price')
+      .eq('supermarket_id', supermarketId)
+      .eq('postal_code', postalCode)
+      .in('product_ean', chunk);
+
+    if (error) {
+      console.error(`Error fetching existing prices:`, error.message);
+      continue;
+    }
+    for (const row of data) {
+      priceMap.set(row.product_ean, { id: row.id, price: parseFloat(row.price) });
+    }
+  }
+  return priceMap;
+}
+
+/**
+ * Batch saves regional prices to the database.
+ * 1. Bulk SELECT existing prices (1 query per 200 EANs)
+ * 2. Bulk UPSERT all scraped results (1 query per 200 rows)
+ * 3. Bulk INSERT history only for changed prices (1 query per batch)
+ */
+async function saveRegionalPricesBatch(results, supermarketId, postalCode, regionLabel) {
+  if (results.length === 0) return { saved: 0, errors: 0 };
+
+  const now = new Date().toISOString();
+  const eans = results.map(r => r.ean);
+
+  // 1. Bulk fetch existing prices
+  const existingPrices = await getExistingPrices(eans, supermarketId, postalCode);
+
+  let totalSaved = 0;
+  let totalErrors = 0;
+  const historyEntries = [];
+
+  // 2. Upsert in chunks of BATCH_SIZE
+  for (let i = 0; i < results.length; i += BATCH_SIZE) {
+    const chunk = results.slice(i, i + BATCH_SIZE);
+
+    const rows = chunk.map(product => ({
       product_ean: product.ean,
       supermarket_id: supermarketId,
       postal_code: postalCode,
@@ -172,35 +191,56 @@ async function saveRegionalPrice(product, supermarketId, postalCode, regionLabel
       price: product.price,
       list_price: product.listPrice,
       is_available: product.isAvailable,
-      last_checked_at: new Date().toISOString(),
-    }, { onConflict: 'product_ean, supermarket_id, postal_code' })
-    .select('id, price')
-    .single();
+      last_checked_at: now,
+    }));
 
-  if (rpError) {
-    console.error(`Error saving regional price for ${product.ean} CP ${postalCode}:`, rpError.message);
-    return false;
-  }
+    const { data: upsertedRows, error: upsertError } = await supabase
+      .from('regional_prices')
+      .upsert(rows, { onConflict: 'product_ean, supermarket_id, postal_code' })
+      .select('id, product_ean, price');
 
-  // Only insert history if price changed or this is a new entry
-  const priceChanged = !existing || Math.abs(parseFloat(existing.price) - parseFloat(product.price)) > 0.01;
+    if (upsertError) {
+      console.error(`Error batch upserting regional prices (CP ${postalCode}):`, upsertError.message);
+      totalErrors += chunk.length;
+      continue;
+    }
 
-  if (priceChanged) {
-    const { error: histError } = await supabase
-      .from('regional_price_history')
-      .insert({
-        regional_price_id: rpData.id,
-        price: product.price,
-        list_price: product.listPrice,
-        scraped_at: new Date().toISOString(),
-      });
+    totalSaved += upsertedRows.length;
 
-    if (histError) {
-      console.error(`Error saving regional history for ${product.ean}:`, histError.message);
+    // 3. Determine which prices changed and queue history entries
+    for (const row of upsertedRows) {
+      const existing = existingPrices.get(row.product_ean);
+      const newPrice = parseFloat(row.price);
+      const priceChanged = !existing || Math.abs(existing.price - newPrice) > 0.01;
+
+      if (priceChanged) {
+        const product = chunk.find(p => p.ean === row.product_ean);
+        historyEntries.push({
+          regional_price_id: row.id,
+          price: newPrice,
+          list_price: product?.listPrice ?? null,
+          scraped_at: now,
+        });
+      }
     }
   }
 
-  return true;
+  // 4. Batch insert history entries
+  if (historyEntries.length > 0) {
+    for (let i = 0; i < historyEntries.length; i += BATCH_SIZE) {
+      const chunk = historyEntries.slice(i, i + BATCH_SIZE);
+      const { error: histError } = await supabase
+        .from('regional_price_history')
+        .insert(chunk);
+
+      if (histError) {
+        console.error(`Error batch inserting regional history:`, histError.message);
+      }
+    }
+    console.log(`  [History] ${historyEntries.length} price changes recorded`);
+  }
+
+  return { saved: totalSaved, errors: totalErrors };
 }
 
 /**
@@ -240,7 +280,7 @@ export async function scrapeRegionalPrices({
 
   console.log(`[Regional] ${supermarketName} | ${eans.length} EANs x ${regions.length} regions | concurrency: ${concurrency}`);
 
-  const stats = { total: 0, saved: 0, notFound: 0, errors: 0 };
+  const stats = { total: 0, saved: 0, notFound: 0, errors: 0, historyEntries: 0 };
 
   // Sequential over regions (1 session per CP)
   for (const [regionLabel, postalCode] of regions) {
@@ -255,16 +295,18 @@ export async function scrapeRegionalPrices({
       continue;
     }
 
-    // Parallel over EANs within this region
+    // Scrape all EANs for this region in parallel, accumulate results
+    const regionResults = [];
+
     const promises = eans.map((ean, index) =>
       limit(async () => {
         stats.total++;
 
         if (index % 100 === 0 && index > 0) {
-          console.log(`[${regionLabel}] Progress: ${index}/${eans.length}`);
+          console.log(`[${regionLabel}] Scraping: ${index}/${eans.length}`);
         }
 
-        const result = await getRegionalPrice(client, account.backendUrl, ean);
+        const result = await getRegionalPrice(client, account.directUrl, ean);
 
         if (!result) {
           stats.notFound++;
@@ -279,16 +321,20 @@ export async function scrapeRegionalPrices({
           return;
         }
 
-        const saved = await saveRegionalPrice(result, supermarketId, postalCode, regionLabel);
-        if (saved) {
-          stats.saved++;
-        } else {
-          stats.errors++;
-        }
+        regionResults.push(result);
       })
     );
 
     await Promise.all(promises);
+
+    // Batch save all results for this region
+    if (!dryRun && regionResults.length > 0) {
+      console.log(`[${regionLabel}] Saving ${regionResults.length} results in batches...`);
+      const { saved, errors } = await saveRegionalPricesBatch(regionResults, supermarketId, postalCode, regionLabel);
+      stats.saved += saved;
+      stats.errors += errors;
+    }
+
     console.log(`[${regionLabel}] Done: ${stats.saved} saved so far`);
   }
 

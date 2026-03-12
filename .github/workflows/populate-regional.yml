@@ -1,0 +1,46 @@
+name: Populate Regional Prices
+
+on:
+  workflow_dispatch:
+    inputs:
+      store:
+        description: 'Supermarket to populate'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - disco
+          - jumbo
+          - vea
+          - carrefour
+          - dia
+          - masonline
+
+jobs:
+  populate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      matrix:
+        store: ${{ inputs.store == 'all' && fromJson('["disco","jumbo","vea","carrefour","dia","masonline"]') || fromJson(format('["{0}"]', inputs.store)) }}
+      max-parallel: 2
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Populate regional prices for ${{ matrix.store }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: node scripts/scrape-regional.js ${{ matrix.store }} --populate
