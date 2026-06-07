@@ -11,7 +11,7 @@ export async function getProducts({ page = 1, limit = 20, sort = 'name' }) {
       brand,
       category,
       image_url,
-      supermarket_products!inner (
+      supermarket_products (
         price,
         list_price,
         is_available,
@@ -19,32 +19,34 @@ export async function getProducts({ page = 1, limit = 20, sort = 'name' }) {
           name
         )
       )
-    `, { count: 'exact' })
-    .eq('supermarket_products.is_available', true)
-    .not('supermarket_products.price', 'is', null);
+    `, { count: 'exact' });
 
   if (sort === 'name') {
     query = query.order('relevance', { ascending: false }).order('name', { ascending: true });
   }
-  
+
   query = query.range(offset, offset + limit - 1);
 
   const { data: products, error, count } = await query;
-  
+
   if (error) throw error;
 
   const processedProducts = products.map(product => {
-    const validPrices = product.supermarket_products
-      .filter(sp => sp.is_available && sp.price !== null)
+    const prices = product.supermarket_products
       .map(sp => ({
         supermarket: sp.supermarkets?.name,
         price: sp.price,
         list_price: sp.list_price,
+        is_available: sp.is_available,
       }));
 
-    if (validPrices.length === 0) return null;
+    const availablePrices = prices
+      .filter(p => p.is_available && p.price !== null)
+      .map(p => p.price);
 
-    const min_price = Math.min(...validPrices.map(p => p.price));
+    const min_price = availablePrices.length > 0
+      ? Math.min(...availablePrices)
+      : null;
 
     return {
       ean: product.ean,
@@ -52,13 +54,17 @@ export async function getProducts({ page = 1, limit = 20, sort = 'name' }) {
       brand: product.brand,
       category: product.category,
       image_url: product.image_url,
-      prices: validPrices,
+      prices,
       min_price,
     };
-  }).filter(p => p !== null);
+  });
 
   if (sort === 'price') {
-    processedProducts.sort((a, b) => a.min_price - b.min_price);
+    processedProducts.sort((a, b) => {
+      if (a.min_price === null) return 1;
+      if (b.min_price === null) return -1;
+      return a.min_price - b.min_price;
+    });
   }
 
   return {
@@ -98,20 +104,23 @@ export async function getProductsByCategory({ category, page = 1, limit = 20 }) 
 
   if (error) throw error;
 
-  const processedProducts = products.map(product => ({
-    ...product,
-    supermarket_products: undefined,
-    prices: product.supermarket_products
-      .filter(sp => sp.is_available)
-      .map(sp => ({
+  const processedProducts = products.map(product => {
+    const availablePrices = product.supermarket_products
+      .filter(sp => sp.is_available && sp.price)
+      .map(sp => sp.price);
+
+    return {
+      ...product,
+      supermarket_products: undefined,
+      prices: product.supermarket_products.map(sp => ({
         supermarket: sp.supermarkets?.name,
         price: sp.price,
         list_price: sp.list_price,
+        is_available: sp.is_available,
       })),
-    min_price: Math.min(...product.supermarket_products
-      .filter(sp => sp.is_available && sp.price)
-      .map(sp => sp.price)) || null,
-  }));
+      min_price: availablePrices.length > 0 ? Math.min(...availablePrices) : null,
+    };
+  });
 
   return {
     products: processedProducts,
@@ -232,20 +241,23 @@ export async function searchProducts({ query, page = 1, limit = 20 }) {
 
   if (error) throw error;
 
-  const processedProducts = products.map(product => ({
-    ...product,
-    supermarket_products: undefined,
-    prices: product.supermarket_products
-      .filter(sp => sp.is_available)
-      .map(sp => ({
+  const processedProducts = products.map(product => {
+    const availablePrices = product.supermarket_products
+      .filter(sp => sp.is_available && sp.price)
+      .map(sp => sp.price);
+
+    return {
+      ...product,
+      supermarket_products: undefined,
+      prices: product.supermarket_products.map(sp => ({
         supermarket: sp.supermarkets?.name,
         price: sp.price,
         list_price: sp.list_price,
+        is_available: sp.is_available,
       })),
-    min_price: Math.min(...product.supermarket_products
-      .filter(sp => sp.is_available && sp.price)
-      .map(sp => sp.price)) || null,
-  }));
+      min_price: availablePrices.length > 0 ? Math.min(...availablePrices) : null,
+    };
+  });
 
   return {
     products: processedProducts,
